@@ -1,0 +1,25 @@
+# OS-specific files
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+env/
+venv/
+
+# Logs and databases
+*.log
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment variables
+.env
+
+# Test directories
+test_dataset/*.png
+test_dataset/*.pkl
