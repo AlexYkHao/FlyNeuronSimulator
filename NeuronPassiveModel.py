@@ -141,6 +141,17 @@ class NeuronPassiveModel(object):
         else:
             plt.show()   
 
+    def save_seg2sec_mapping(self, save_path: str) -> None:
+        accum_idx = 0
+        seg2sec_mapping = {}
+        for sec in h.allsec():
+            for j in range(sec.n3d()):
+                seg2sec_mapping[accum_idx] = sec.name()
+                accum_idx += 1
+        with open(save_path, 'wb') as f:
+            pickle.dump(seg2sec_mapping, f)
+        return seg2sec_mapping
+
 
 
 class NeuronInputSampler(object):
