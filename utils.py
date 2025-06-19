@@ -104,6 +104,13 @@ def get_decay_delay(simulation_pickle: str):
     return result_dict
 
 
+def get_masked_decay_delay(simulation_pickle: str, mask_A=None, mask_B=None):
+    """
+    To implement: calculate the decay_ratio, peak_time, width_change, and distance between two masks
+    """
+    pass
+
+
 def sample_v_traces(simulation_pickle: str, max_trace_overlay: bool = False, trace_idx: float = 0.5, xlim: tuple = (0, 1000)):
     with open(simulation_pickle, 'rb') as f:
         data = pickle.load(f)
