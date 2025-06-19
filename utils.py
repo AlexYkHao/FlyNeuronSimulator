@@ -2,13 +2,16 @@ import os
 import pickle
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.spatial import ConvexHull
+from scipy.spatial.distance import cdist
+from typing import Union, Optional, List
 
 import navis
 import navis.interfaces.neuprint as neu
-from neuprint import Client, fetch_neurons, fetch_skeleton, fetch_synapses, attach_synapses_to_skeleton, fetch_simple_connections, fetch_synapse_connections
+from neuprint import Client, fetch_neurons, fetch_skeleton, fetch_mean_synapses
 from neuprint import NeuronCriteria as NC, SynapseCriteria as SC
-
 
 
 def skeleton_df_to_swc(df, rescaling_factor=0.008, export_path=None):
@@ -46,3 +49,180 @@ def skeleton_df_to_swc(df, rescaling_factor=0.008, export_path=None):
             f.write(swc)
 
     return swc
+
+
+def get_most_important_column_coords(nid, roi_info:dict):
+    # for a given neuron, figure out a column with the most input
+    per_column_input = {}
+    for k, v in roi_info.items():
+        if '_col_' in k:
+            if 'post' in v.keys():
+                per_column_input[k] = v['post']
+
+    # sort the columns by the number of inputs
+    sorted_columns = {k: v for k, v in sorted(per_column_input.items(), key=lambda item: item[1], reverse=True)}
+    most_input_column = list(sorted_columns.keys())[0]
+
+    # fetch the mean synapses in this column
+    mean_synapses_df = fetch_mean_synapses(nid, SC(type='post', rois=most_input_column, primary_only=False))
+    return mean_synapses_df[['x', 'y', 'z']].mean()
+
+
+def get_decay_delay(simulation_pickle: str):
+    result_dict = {}
+    with open(simulation_pickle, 'rb') as f:
+        data = pickle.load(f)
+        v_traces = data['v_traces']
+        t_vec = data['t']
+        x_coords = data['x_coords']
+        y_coords = data['y_coords']
+        z_coords = data['z_coords']
+        p_coords = np.array([x_coords, y_coords, z_coords]).T
+        # now calculate v-trace weighted centroid time for each v-trace
+        centroid_times = []
+        AOC = []
+        time_variances = []
+        for v_trace in v_traces:
+            v_trace = v_trace - v_trace[0]
+            A = np.sum(v_trace) + 0.0001
+            B = np.sum(v_trace * t_vec)
+            C = np.sum(v_trace * t_vec**2)
+            AOC.append(A)
+            centroid_times.append(B/A)
+            time_variances.append(C/A - (B/A)**2)
+        result_dict['max_decay_ratio'] = max(AOC)/min(AOC)
+        result_dict['peak_time'] = max(centroid_times) - min(centroid_times)
+        result_dict['width_change'] = max(time_variances) - min(time_variances)
+        max_AOC_idx = np.argmax(AOC)
+        min_AOC_idx = np.argmin(AOC)
+        result_dict['min_max_distance'] = np.linalg.norm(p_coords[max_AOC_idx] - p_coords[min_AOC_idx])
+        # calculate the max distance between two points
+        hull = ConvexHull(p_coords)
+        hull_points = p_coords[hull.vertices]
+        distances = cdist(hull_points, hull_points)
+        result_dict['max_distance'] = np.max(distances)
+    return result_dict
+
+
+def sample_v_traces(simulation_pickle: str, max_trace_overlay: bool = False, trace_idx: float = 0.5, xlim: tuple = (0, 1000)):
+    with open(simulation_pickle, 'rb') as f:
+        data = pickle.load(f)
+        v_traces = data['v_traces']
+        t_vec = data['t']
+        peak_amplitudes = data['peak_amplitudes']
+    max_trace_idx = np.argmax(peak_amplitudes)
+    plot_trace_idx = int(trace_idx * len(v_traces))
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(t_vec, v_traces[plot_trace_idx], label='Trace {}'.format(plot_trace_idx))
+    if max_trace_overlay:
+        ax.plot(t_vec, v_traces[max_trace_idx], label='Max Trace')
+    ax.legend()
+    ax.set_xlim(xlim)
+    plt.show()
+
+
+def plot_bars_with_scatter(df: pd.DataFrame, 
+                          x_col: str, 
+                          y_col: str,
+                          figsize: tuple = (10, 6),
+                          bar_alpha: float = 0.7,
+                          scatter_alpha: float = 0.6,
+                          scatter_size: float = 30,
+                          jitter_width: float = 0.3,
+                          bar_color: str = 'skyblue',
+                          scatter_color: str = 'red',
+                          error_bars: bool = True,
+                          title: Optional[str] = None,
+                          xlabel: Optional[str] = None,
+                          ylabel: Optional[str] = None) -> plt.Figure:
+    """
+    Create a bar plot with overlaid scatter points.
+    
+    Args:
+        df: DataFrame containing the data
+        x_col: Column name for x-axis (categorical labels)
+        y_col: Column name for y-axis (lists of numbers)
+        figsize: Figure size as (width, height)
+        bar_alpha: Transparency of bars (0-1)
+        scatter_alpha: Transparency of scatter points (0-1)
+        scatter_size: Size of scatter points
+        jitter_width: Width of horizontal jitter for scatter points
+        bar_color: Color of the bars
+        scatter_color: Color of scatter points
+        error_bars: Whether to show error bars (standard error)
+        title: Plot title
+        xlabel: X-axis label
+        ylabel: Y-axis label
+    
+    Returns:
+        matplotlib Figure object
+    """
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Get unique categories
+    categories = df[x_col].unique()
+    
+    # Calculate means and standard errors for each category
+    means = []
+    std_errors = []
+    
+    for cat in categories:
+        # Get all values for this category
+        cat_data = df[df[x_col] == cat][y_col]
+        
+        # Flatten all lists for this category
+        all_values = []
+        for item in cat_data:
+            if isinstance(item, (list, np.ndarray)):
+                all_values.extend(item)
+            else:
+                all_values.append(item)
+        
+        all_values = np.array(all_values)
+        means.append(np.mean(all_values))
+        std_errors.append(np.std(all_values) / np.sqrt(len(all_values)))
+    
+    # Create bar plot
+    x_positions = np.arange(len(categories))
+    bars = ax.bar(x_positions, means, alpha=bar_alpha, color=bar_color, 
+                  label='Mean', width=0.6)
+    
+    # Add error bars if requested
+    if error_bars:
+        ax.errorbar(x_positions, means, yerr=std_errors, 
+                   fmt='none', color='black', capsize=5, capthick=1)
+    
+    # Add scatter points
+    for i, cat in enumerate(categories):
+        cat_data = df[df[x_col] == cat][y_col]
+        
+        # Collect all individual points
+        y_points = []
+        for item in cat_data:
+            if isinstance(item, (list, np.ndarray)):
+                y_points.extend(item)
+            else:
+                y_points.append(item)
+        
+        # Create jittered x positions
+        n_points = len(y_points)
+        x_jitter = np.random.uniform(-jitter_width/2, jitter_width/2, n_points)
+        x_points = np.full(n_points, i) + x_jitter
+        
+        # Plot scatter points
+        ax.scatter(x_points, y_points, alpha=scatter_alpha, 
+                  s=scatter_size, color=scatter_color, 
+                  label='Data points' if i == 0 else "")
+    
+    # Customize plot
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(categories)
+    ax.set_xlabel(xlabel or x_col)
+    ax.set_ylabel(ylabel or y_col)
+    ax.set_title(title or f'{y_col} by {x_col}')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
