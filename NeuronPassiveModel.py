@@ -181,11 +181,15 @@ class NeuronInputSampler(object):
             print(f"No synapses found for {self.nid}")
             return
         syn_df = fetch_synapse_connections(source_criteria=conn_df['bodyId_pre'].to_list(), target_criteria=self.nid)
-        # ditch the bodyId_pre, bodyId_post, and roi_pre columns
+        # ditch the bodyId_post and roi_pre columns
         syn_df = syn_df.drop(columns=['bodyId_post', 'roi_pre'])
-        syn_df['weight'] = 1.0
-        # groupn syn_df by bodyId_post and roi_post, and average the x, y, z coordinates
-        syn_df_grouped = syn_df.groupby(['bodyId_pre','roi_post']).mean()
+        # Group by bodyId_pre and roi_post, count synapses and average coordinates
+        syn_df_grouped = syn_df.groupby(['bodyId_pre', 'roi_post']).agg({
+            'x_post': 'mean',
+            'y_post': 'mean', 
+            'z_post': 'mean',
+            'bodyId_pre': 'count'  # Count number of synapses
+        }).rename(columns={'bodyId_pre': 'weight'})
         syn_df_grouped = syn_df_grouped.reset_index()
         if roi is not None:
             syn_df_grouped = syn_df_grouped[syn_df_grouped['roi_post']==roi]
