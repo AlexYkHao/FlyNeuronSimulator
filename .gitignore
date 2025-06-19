@@ -13,6 +13,9 @@ venv/
 # Logs and databases
 *.log
 
+# Tokens
+token.txt
+
 # IDE settings
 .vscode/
 .idea/
