@@ -4,6 +4,7 @@ from typing import Optional, Tuple, List, Dict, Any
 import numpy.typing as npt
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from neuprint import Client, fetch_neurons, fetch_mean_synapses, fetch_synapse_connections, fetch_synapses,fetch_simple_connections
@@ -170,15 +171,19 @@ class NeuronInputSampler(object):
         # Get the pre-synaptic type with most synapses to type A
         self.source_type = synapse_counts.index[0]
 
-    def sample_input_site(self, roi=None, n_samples=5):
+    def sample_input_site(self, roi=None, n_samples=5, sample_type='random'):
         conn_df = fetch_simple_connections(
             upstream_criteria=NC(type=self.source_type),  # Any upstream neuron
             downstream_criteria=self.nid,  # Type A as downstream
             min_weight=self.min_weight   # Minimum number of synapses
         )
+        if len(conn_df) == 0:
+            print(f"No synapses found for {self.nid}")
+            return
         syn_df = fetch_synapse_connections(source_criteria=conn_df['bodyId_pre'].to_list(), target_criteria=self.nid)
         # ditch the bodyId_pre, bodyId_post, and roi_pre columns
         syn_df = syn_df.drop(columns=['bodyId_post', 'roi_pre'])
+        syn_df['weight'] = 1.0
         # groupn syn_df by bodyId_post and roi_post, and average the x, y, z coordinates
         syn_df_grouped = syn_df.groupby(['bodyId_pre','roi_post']).mean()
         syn_df_grouped = syn_df_grouped.reset_index()
@@ -186,10 +191,21 @@ class NeuronInputSampler(object):
             syn_df_grouped = syn_df_grouped[syn_df_grouped['roi_post']==roi]
         # now draw n_samples from the syn_df_grouped and save the x, y, z coordinates in the injection_sites
         n_samples = min(n_samples, len(syn_df_grouped))
-        self.injection_sites = syn_df_grouped.sample(n_samples)
+        if sample_type == 'random':
+            self.injection_sites = syn_df_grouped.sample(n_samples)
+        elif sample_type == 'top':
+            self.injection_sites = syn_df_grouped.sort_values(by='weight', ascending=False).head(n_samples)
+        else:
+            raise ValueError(f"Invalid sample_type: {sample_type}")
         # turn the coordinates into micrometer
         self.injection_site_coords = self.injection_sites[['x_post', 'y_post', 'z_post']].to_numpy() * self.scaling_factor
     
     def save_injection_sites(self, save_path: str) -> None:
+        if self.injection_sites is None:
+            return
         self.injection_sites.to_pickle(save_path)
+
+    def load_injection_sites(self, load_path: str) -> None:
+        self.injection_sites = pd.read_pickle(load_path)
+        self.injection_site_coords = self.injection_sites[['x_post', 'y_post', 'z_post']].to_numpy() * self.scaling_factor
 
