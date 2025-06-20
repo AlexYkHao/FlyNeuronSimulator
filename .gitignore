@@ -24,5 +24,7 @@ token.txt
 .env
 
 # Test directories
-test_dataset/*.png
-test_dataset/*.pkl
+test_dataset/
+
+# notebooks
+*.ipynb
