@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull
 from scipy.spatial.distance import cdist
 from typing import Union, Optional, List
+import plotly.graph_objects as go
 
 import navis
 import navis.interfaces.neuprint as neu
@@ -104,7 +105,9 @@ def get_decay_delay(simulation_pickle: str):
     return result_dict
 
 
-def get_masked_decay_delay(simulation_pickle: str, sec_mapping_path:str, region_mask_path:str):
+def get_masked_decay_delay(simulation_pickle: str, 
+                           sec_mapping_path:str, 
+                           region_mask_path:str):
     with open(region_mask_path, 'rb') as f:
         region_mask = pickle.load(f)
     with open(sec_mapping_path, 'rb') as f:
@@ -144,7 +147,9 @@ def get_masked_decay_delay(simulation_pickle: str, sec_mapping_path:str, region_
     return result_dict
 
 
-def sample_v_traces(simulation_pickle: str, max_trace_overlay: bool = False, trace_idx: float = 0.5, xlim: tuple = (0, 1000)):
+def sample_v_traces(simulation_pickle: str, 
+                    max_trace_overlay: bool = False, 
+                    trace_idx: float = 0.5, xlim: tuple = (0, 1000)):
     with open(simulation_pickle, 'rb') as f:
         data = pickle.load(f)
         v_traces = data['v_traces']
@@ -158,6 +163,42 @@ def sample_v_traces(simulation_pickle: str, max_trace_overlay: bool = False, tra
         ax.plot(t_vec, v_traces[max_trace_idx], label='Max Trace')
     ax.legend()
     ax.set_xlim(xlim)
+    plt.show()
+
+
+def sample_grouped_v_traces(simulation_pickle: str, 
+                           sec_mapping_path:str, 
+                           region_mask_path:str,
+                           max_trace_overlay: bool = False):
+    with open(region_mask_path, 'rb') as f:
+        region_mask = pickle.load(f)
+    with open(sec_mapping_path, 'rb') as f:
+        seg2seg_mapping = pickle.load(f)
+
+    region_mask_dict = {sec: reg for reg in region_mask.keys() for sec in list(region_mask[reg]) }
+    grouped_traces = {reg:[] for reg in region_mask.keys()}
+   
+    with open(simulation_pickle, 'rb') as f:
+        data = pickle.load(f)
+    t_vec = data['t']
+    peak_amplitudes = data['peak_amplitudes']
+    max_trace_idx = np.argmax(peak_amplitudes)
+    i = 0 
+    for v_trace in data['v_traces']:
+        which_sec = seg2seg_mapping[i]
+        i += 1
+        if which_sec not in region_mask_dict.keys():
+            continue
+        which_group = region_mask_dict[which_sec]
+        grouped_traces[which_group].append(v_trace - v_trace[0])
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for reg in region_mask.keys():
+        ax.plot(t_vec, np.mean(grouped_traces[reg], axis=0), label=reg)
+    if max_trace_overlay:
+        max_trace = data['v_traces'][max_trace_idx]
+        max_trace = max_trace - max_trace[0]
+        ax.plot(t_vec, max_trace, label='Max Trace')
+    ax.legend()
     plt.show()
 
 
@@ -266,3 +307,51 @@ def plot_bars_with_scatter(df: pd.DataFrame,
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
+
+
+def show_regional_masks_3d(simulation_pickle: str, 
+                           sec_mapping_path:str, 
+                           region_mask_path:str, 
+                           save_path:str):
+    colors = ['gray', 'red', 'blue', 'green', 'yellow', 'purple', 'orange']
+    with open(region_mask_path, 'rb') as f:
+        region_mask = pickle.load(f)
+    with open(sec_mapping_path, 'rb') as f:
+        seg2seg_mapping = pickle.load(f)
+    with open(simulation_pickle, 'rb') as f:
+        data = pickle.load(f)
+
+    region_mask_dict = {sec: reg for reg in region_mask.keys() for sec in list(region_mask[reg]) }
+
+    unlabeled_set = set(seg2seg_mapping.values()) - set(region_mask_dict.keys())
+    region_mask_dict.update({lb:'others' for lb in list(unlabeled_set)})
+
+    colored_skeleton = {}
+    colored_skeleton['others'] = []
+    colored_skeleton.update({reg:[] for reg in region_mask.keys()})
+    colored_skeleton
+    i = 0
+    for p in zip(data['x_coords'], data['y_coords'], data['z_coords']):
+        which_sec = seg2seg_mapping[i]
+        which_group = region_mask_dict[which_sec]
+        colored_skeleton[which_group].append(p)
+        i += 1
+
+    fig = go.Figure()
+    for i, (k, v) in enumerate(colored_skeleton.items()):
+        p_array = np.array(v).T
+        fig.add_trace(go.Scatter3d(
+            x=p_array[0], y=p_array[1], z=p_array[2],
+            mode='markers',
+            marker=dict(
+                color=colors[i], # Sets all markers to blue
+                size=2
+            ),
+            name=k,
+            showlegend=False  # Turn on if you want to see section names
+        ))
+    fig.update_layout(
+        scene=dict(aspectmode='data'),
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    fig.write_html(save_path)
