@@ -104,11 +104,44 @@ def get_decay_delay(simulation_pickle: str):
     return result_dict
 
 
-def get_masked_decay_delay(simulation_pickle: str, mask_A=None, mask_B=None):
-    """
-    To implement: calculate the decay_ratio, peak_time, width_change, and distance between two masks
-    """
-    pass
+def get_masked_decay_delay(simulation_pickle: str, sec_mapping_path:str, region_mask_path:str):
+    with open(region_mask_path, 'rb') as f:
+        region_mask = pickle.load(f)
+    with open(sec_mapping_path, 'rb') as f:
+        seg2seg_mapping = pickle.load(f)
+
+    region_mask_dict = {sec: reg for reg in region_mask.keys() for sec in list(region_mask[reg]) }
+    grouped_traces = {reg:[] for reg in region_mask.keys()}
+    grouped_points = {reg:[] for reg in region_mask.keys()}
+   
+    with open(simulation_pickle, 'rb') as f:
+        data = pickle.load(f)
+        t_vec = data['t']
+        i = 0 
+        for x, y, z, v_trace in zip(data['x_coords'], data['y_coords'], data['z_coords'], data['v_traces']):
+            which_sec = seg2seg_mapping[i]
+            i += 1
+            if which_sec not in region_mask_dict.keys():
+                continue
+            which_group = region_mask_dict[which_sec]
+            grouped_traces[which_group].append(v_trace - v_trace[0])
+            grouped_points[which_group].append([x, y, z])
+
+    result_dict = {'AOC':{}, 'centroid_time':{}, 'time_variance':{}, 'group_centroids':{}}
+    for reg in region_mask.keys():
+        v_trace = grouped_traces[reg]
+        v_trace = np.array(v_trace)
+        p_coords = grouped_points[reg]
+        p_coords = np.array(p_coords)
+        mean_v_trace = v_trace.mean(axis=0)
+        A = np.sum(mean_v_trace) + 0.0001
+        B = np.sum(mean_v_trace * t_vec)
+        C = np.sum(mean_v_trace * t_vec**2)
+        result_dict['AOC'][reg] = A
+        result_dict['centroid_time'][reg] = B/A
+        result_dict['time_variance'][reg] = C/A - (B/A)**2
+        result_dict['group_centroids'][reg] = p_coords.mean(axis=0)
+    return result_dict
 
 
 def sample_v_traces(simulation_pickle: str, max_trace_overlay: bool = False, trace_idx: float = 0.5, xlim: tuple = (0, 1000)):
