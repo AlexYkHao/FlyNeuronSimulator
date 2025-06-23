@@ -312,7 +312,7 @@ def plot_bars_with_scatter(df: pd.DataFrame,
 def show_regional_masks_3d(simulation_pickle: str, 
                            sec_mapping_path:str, 
                            region_mask_path:str, 
-                           save_path:str):
+                           save_path=None):
     colors = ['gray', 'red', 'blue', 'green', 'yellow', 'purple', 'orange']
     with open(region_mask_path, 'rb') as f:
         region_mask = pickle.load(f)
@@ -354,4 +354,7 @@ def show_regional_masks_3d(simulation_pickle: str,
         scene=dict(aspectmode='data'),
         margin=dict(l=0, r=0, t=40, b=0)
     )
-    fig.write_html(save_path)
+    if save_path:
+        fig.write_html(save_path)
+    else:
+        return fig
