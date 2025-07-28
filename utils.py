@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 
 import navis
 import navis.interfaces.neuprint as neu
-from neuprint import Client, fetch_neurons, fetch_skeleton, fetch_mean_synapses
+from neuprint import Client, fetch_neurons, fetch_skeleton, fetch_mean_synapses, fetch_synapses
 from neuprint import NeuronCriteria as NC, SynapseCriteria as SC
 
 
@@ -314,6 +314,7 @@ def show_regional_masks_3d(simulation_pickle: str,
                            region_mask_path:str, 
                            save_path=None):
     colors = ['gray', 'red', 'blue', 'green', 'yellow', 'purple', 'orange']
+    n_colors = len(colors)
     with open(region_mask_path, 'rb') as f:
         region_mask = pickle.load(f)
     with open(sec_mapping_path, 'rb') as f:
@@ -339,13 +340,16 @@ def show_regional_masks_3d(simulation_pickle: str,
 
     fig = go.Figure()
     for i, (k, v) in enumerate(colored_skeleton.items()):
+        if len(v) == 0:
+            continue
         p_array = np.array(v).T
         fig.add_trace(go.Scatter3d(
             x=p_array[0], y=p_array[1], z=p_array[2],
             mode='markers',
             marker=dict(
-                color=colors[i], # Sets all markers to blue
-                size=2
+                color=colors[i%n_colors], # Sets all markers to blue
+                size=2,
+                opacity=0.5
             ),
             name=k,
             showlegend=False  # Turn on if you want to see section names
@@ -358,3 +362,63 @@ def show_regional_masks_3d(simulation_pickle: str,
         fig.write_html(save_path)
     else:
         return fig
+    
+    
+def find_column_structure(nid, column_name:str, max_item=20, rescaling_factor=0.008):
+    # download the synapses projecting on the neuron, and aggregate them by roi
+    synapses_df = fetch_synapses(NC(bodyId=nid), SC(type='post', primary_only=False))
+    synapses_df_reduced = synapses_df.drop(columns=['type'])
+    synapses_df_reduced = synapses_df_reduced.groupby(['roi']).agg({
+                'x': list, # list,
+                'y': list, 
+                'z': list,
+                'confidence': 'mean',
+                'bodyId': 'count'  # Count number of synapses
+            }).rename(columns={'bodyId': 'weight'})
+    synapses_df_reduced = synapses_df_reduced.reset_index()
+
+    # find the rows with roi containing the column_name, and sort by synapse count (weight)
+    synapses_df_layered = synapses_df_reduced.loc[synapses_df_reduced['roi'].str.contains(column_name)]
+    synapses_df_layered = synapses_df_layered.sort_values(by='weight', ascending=False).reset_index(drop=True)
+    
+    synapses_df_layered = synapses_df_layered.iloc[:max_item]
+    # aggregate the x, y, z columns to get the mean of each list
+    synapses_df_layered['cx'] = synapses_df_layered['x'].apply(lambda x: rescaling_factor*np.mean(x))
+    synapses_df_layered['cy'] = synapses_df_layered['y'].apply(lambda x: rescaling_factor*np.mean(x))
+    synapses_df_layered['cz'] = synapses_df_layered['z'].apply(lambda x: rescaling_factor*np.mean(x))
+
+    # merge [x, y, z] into a single column
+    synapses_df_layered['p'] = synapses_df_layered[['cx', 'cy', 'cz']].apply(lambda x: np.array(x), axis=1)
+    return synapses_df_layered
+
+def construct_convex_hull(synapses_df_layered, p, distance_threshold=5, rescaling_factor=0.008):
+    from scipy.spatial import ConvexHull, Delaunay
+    # find the row in synapses_df_layered, whose x, y, z are closest to the injection site p
+    distance_df = synapses_df_layered.apply(lambda row: np.linalg.norm(row['p'] - p), axis=1)
+    # find the row with the minimum distance
+    closest_roi = distance_df.idxmin()
+    distance = distance_df.min()
+    if distance > distance_threshold:
+        print(f'The distance between the injection site and the closest synapse is less than the threshold ({distance_threshold} um)')
+        return None
+
+    chosen_column = synapses_df_layered.loc[closest_roi]
+    points = np.array(chosen_column[['x', 'y', 'z']].tolist()).T * rescaling_factor
+    hull = ConvexHull(points)
+    # Get the vertices of the convex hull
+    hull_vertices = points[hull.vertices]
+    hull_delaunay = Delaunay(points[hull.vertices])
+    return hull_delaunay
+
+def construct_convex_hull_all(synapses_df_layered, rescaling_factor=0.008):
+    from scipy.spatial import ConvexHull, Delaunay
+    roi_hull_dict = {}
+    for i, row in synapses_df_layered.iterrows():
+        points = np.array(row[['x', 'y', 'z']].tolist()).T * rescaling_factor
+        if points.shape[0] <= 4:
+            continue  # not enough points to construct a hull
+        hull = ConvexHull(points)
+        # Get the vertices of the convex hull
+        hull_delaunay = Delaunay(points[hull.vertices])
+        roi_hull_dict[row['roi']] = hull_delaunay
+    return roi_hull_dict

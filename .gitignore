@@ -12,6 +12,7 @@ venv/
 
 # Logs and databases
 *.log
+*.pdf
 
 # Tokens
 token.txt
