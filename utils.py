@@ -206,16 +206,17 @@ def plot_bars_with_scatter(df: pd.DataFrame,
                           x_col: str, 
                           y_col: str,
                           figsize: tuple = (10, 6),
+                          fontsize: float = 12,
+                          tick_length: float = 2,
                           bar_alpha: float = 0.7,
                           scatter_alpha: float = 0.6,
                           scatter_size: float = 30,
                           jitter_width: float = 0.3,
                           bar_color: str = 'skyblue',
                           scatter_color: str = 'red',
+                          y_ticks: list = None,
                           error_bars: bool = True,
-                          title: Optional[str] = None,
-                          xlabel: Optional[str] = None,
-                          ylabel: Optional[str] = None) -> plt.Figure:
+                          save_path: str = None) -> plt.Figure:
     """
     Create a bar plot with overlaid scatter points.
     
@@ -224,22 +225,26 @@ def plot_bars_with_scatter(df: pd.DataFrame,
         x_col: Column name for x-axis (categorical labels)
         y_col: Column name for y-axis (lists of numbers)
         figsize: Figure size as (width, height)
+        fontsize: Font size for the plot
+        tick_length: Length of the tick marks
         bar_alpha: Transparency of bars (0-1)
         scatter_alpha: Transparency of scatter points (0-1)
         scatter_size: Size of scatter points
         jitter_width: Width of horizontal jitter for scatter points
         bar_color: Color of the bars
-        scatter_color: Color of scatter points
+        scatter_color: Color of scatter points. If this is viridis, the scatter points will be colored by the index of each item
+        y_ticks: List of y-axis ticks
         error_bars: Whether to show error bars (standard error)
-        title: Plot title
-        xlabel: X-axis label
-        ylabel: Y-axis label
+        save_path: Path to save the figure
     
     Returns:
         matplotlib Figure object
     """
     
     # Create figure and axis
+    plt.rcParams.update({'font.size': fontsize, 'font.family': 'Arial'})
+    plt.rcParams['xtick.major.size'] = tick_length
+    plt.rcParams['ytick.major.size'] = tick_length
     fig, ax = plt.subplots(figsize=figsize)
     
     # Get unique categories
@@ -291,22 +296,32 @@ def plot_bars_with_scatter(df: pd.DataFrame,
         n_points = len(y_points)
         x_jitter = np.random.uniform(-jitter_width/2, jitter_width/2, n_points)
         x_points = np.full(n_points, i) + x_jitter
+        if scatter_color == 'viridis':
+            color_list = plt.get_cmap('viridis')(np.linspace(0, 1, n_points)) 
+        else:
+            color_list = scatter_color
         
         # Plot scatter points
         ax.scatter(x_points, y_points, alpha=scatter_alpha, 
-                  s=scatter_size, color=scatter_color, 
-                  label='Data points' if i == 0 else "")
+                  s=scatter_size, color=color_list, linewidth=0)
     
     # Customize plot
     ax.set_xticks(x_positions)
     ax.set_xticklabels(categories)
-    ax.set_xlabel(xlabel or x_col)
-    ax.set_ylabel(ylabel or y_col)
-    ax.set_title(title or f'{y_col} by {x_col}')
-    ax.legend()
+    if y_ticks:
+        ax.set_yticks(y_ticks)
+    # remove the upper and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    #ax.legend()
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
 
 
 def show_regional_masks_3d(simulation_pickle: str, 
